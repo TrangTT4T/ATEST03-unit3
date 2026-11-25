@@ -349,12 +349,20 @@ The traceability matrix is printed after every run and written to
   (and so a new, empty cart) with no clean-up requests.
 - Never try to bypass bot protection. A BLOCKED run is information, not a failure to hide.
 
-## CI
+## CI and manual runs (GitHub Actions)
 
-Continuous integration, the container image and cloud runs are Unit 4 topics: see
-[ATEST03-unit4](https://github.com/TrangTT4T/ATEST03-unit4). Here, run the same gates locally:
-`ruff check . && ruff format --check . && mypy && python -m framework.review --strict` and
-`pytest --store fake -n auto --fail-on-uncovered --cov`.
+`.github/workflows/ci.yml` runs the quality gates (ruff, format, mypy, BDD review), every offline suite with the
+requirement and coverage gates, and the events tests against the fixed sandbox build, on every push.
+To choose what runs: **Actions → ci → Run workflow**, then pick
+
+| Option | Values |
+| --- | --- |
+| suite | all-offline, unit, offline-bdd, events, live-smoke |
+| sandbox_build | release (3 known defects, strict xfail), fixed (all must pass) |
+| quality | run the quality gates first |
+
+The container image, performance tests and cloud runs are Unit 4 topics: see
+[ATEST03-unit4](https://github.com/TrangTT4T/ATEST03-unit4).
 
 ## Refreshing the offline catalogue
 

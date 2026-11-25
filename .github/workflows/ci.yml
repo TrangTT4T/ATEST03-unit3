@@ -1,0 +1,101 @@
+# Unit 3: web BDD (offline), mobile (Appium, deselected without a device) and the order-events sandbox
+#
+#   push / pull request   quality gates, then every offline suite with the coverage gates,
+#                         then the events tests against the fixed sandbox build (oracle validation)
+#   Run workflow (manual) choose the suite, the sandbox build, and whether to run the quality gates
+name: ci
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: Which tests to run
+        type: choice
+        options: [all-offline, unit, offline-bdd, events, live-smoke]
+        default: all-offline
+      sandbox_build:
+        description: Order-events sandbox build (release has the 3 known defects; fixed has none)
+        type: choice
+        options: [release, fixed]
+        default: release
+      quality:
+        description: Run the quality gates first (ruff, format, mypy, BDD review)
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Lint, format, types, BDD review
+    if: github.event_name != 'workflow_dispatch' || inputs.quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: mypy
+      - name: BDD review (step usage, ambiguity, Gherkin smells)
+        run: python -m framework.review --strict
+
+  tests:
+    name: Tests (${{ inputs.suite || 'all-offline' }}, sandbox ${{ inputs.sandbox_build || 'release' }})
+    needs: quality
+    # Runs after the quality gates, or on its own when they were switched off for a manual run.
+    if: ${{ !cancelled() && (needs.quality.result == 'success' || needs.quality.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # Inputs reach the shell through the environment, never by ${{ }} inside a script.
+      SUITE: ${{ inputs.suite || 'all-offline' }}
+      SANDBOX_BUILD: ${{ inputs.sandbox_build || 'release' }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
+      - name: Install Chromium (live suite only)
+        if: env.SUITE == 'live-smoke'
+        run: playwright install --with-deps chromium
+      - name: Run the suite
+        run: |
+          echo "Suite: ${SUITE} | sandbox build: ${SANDBOX_BUILD}"
+          case "$SUITE" in
+            all-offline) pytest --store fake -n auto --sandbox-build "$SANDBOX_BUILD" --fail-on-uncovered --cov --cov-report=term ;;
+            unit)        pytest --store fake tests/unit -n auto ;;
+            offline-bdd) pytest --store fake tests/test_*.py -n auto --sandbox-build "$SANDBOX_BUILD" ;;
+            events)      pytest --store fake tests/events tests/test_order_events.py -n auto --sandbox-build "$SANDBOX_BUILD" ;;
+            live-smoke)  pytest tests/test_*.py -m smoke ;;
+            *) echo "unknown suite: $SUITE"; exit 2 ;;
+          esac
+      - name: "Oracle validation: events tests must all pass against the fixed sandbox build"
+        if: github.event_name != 'workflow_dispatch'
+        run: pytest --store fake tests/events tests/test_order_events.py -n auto --sandbox-build fixed
+      - name: Job summary
+        if: ${{ !cancelled() }}
+        run: |
+          if [ -f reports/traceability.md ]; then cat reports/traceability.md >> "$GITHUB_STEP_SUMMARY"; fi
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with:
+          name: reports-${{ env.SUITE }}
+          path: reports/
+          retention-days: 14
+          if-no-files-found: ignore
