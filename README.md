@@ -35,6 +35,8 @@ mobile app (Appium, Unit 3 Day 11) and an asynchronous order-events system (Unit
 
 ## Quick start
 
+Requires **Python 3.12**: the version in `.python-version` (PyCharm, VS Code, pyenv and uv pick it up), the same as CI and the Docker image of Units 3–5.
+
 ```bash
 python -m venv .venv
 ```
